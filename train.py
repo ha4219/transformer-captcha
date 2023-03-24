@@ -10,9 +10,9 @@ from sklearn.model_selection import train_test_split
 paths = glob('/home/dongha/code/captcha/data/*/*')
 train_paths, test_paths = train_test_split(paths)
 
-train_loader, train_dataset = create_dataloader(train_paths)
-test_loader, test_dataset = create_dataloader(test_paths)
 
+train_loader, train_dataset = create_dataloader(train_paths, augment=True)
+test_loader, test_dataset = create_dataloader(test_paths, augment=True)
 
 lr = 1e-3
 model = ViT()
