@@ -2,6 +2,8 @@ import torch
 from torch.utils.data import Dataset
 from PIL import Image
 import os
+from transformers import AdamW
+from tqdm import tqdm
 
 os.environ['PROTOCOL_BUFFERS_PYTHON_IMPLEMENTATION'] = 'python'
 
@@ -43,7 +45,7 @@ p2 = glob.glob(path2)
 p3 = glob.glob(path3)
 min_length = min([len(p1), len(p2), len(p3)])
 all_path = p1[:min_length] + p2[:min_length] + p3[:min_length]
-train_path, test_path = train_test_split(p1)
+train_path, test_path = train_test_split(all_path, random_state=42)
 
 processor = TrOCRProcessor.from_pretrained("microsoft/trocr-small-printed")
 train_dataset = IAMDataset(paths=train_path, processor=processor)
@@ -99,6 +101,9 @@ from datasets import load_metric
 
 cer_metric = load_metric("cer")
 
+import datetime
+fnn = datetime.datetime.now(datetime.timezone(datetime.timedelta(hours=9),"JST")).strftime("%Y%m%dT%H%M%S")
+
 def compute_cer(pred_ids, label_ids):
     pred_str = processor.batch_decode(pred_ids, skip_special_tokens=True)
     label_ids[label_ids == -100] = processor.tokenizer.pad_token_id
@@ -109,14 +114,15 @@ def compute_cer(pred_ids, label_ids):
     return cer
 
 def train():
-    from transformers import AdamW
-    from tqdm import tqdm
+    
 
     optimizer = AdamW(model.parameters(), lr=5e-5)
     train_loader_length = len(train_dataloader)
     eval_loader_length = len(eval_dataloader)
+    best_loss = 10.0
+    train_loss_list, eval_loss_list = [], []
 
-    for epoch in range(1000):  # loop over the dataset multiple times
+    for epoch in range(epochs):  # loop over the dataset multiple times
         # train
         model.train()
         train_loss = 0.0
@@ -136,7 +142,7 @@ def train():
             train_loss += loss.item()
             pbar.set_description(f'{epoch}, train_loss: {train_loss / train_loader_length}')
         # print(f"Loss after epoch {epoch}:", train_loss/len(train_dataloader))
-            
+        train_loss_list.append(train_loss / train_loader_length)
         # evaluate
         model.eval()
         valid_cer = 0.0
@@ -151,30 +157,61 @@ def train():
                 pbar.set_description(f'{epoch}, eval_loss: {valid_cer / eval_loader_length}')
         
         total_cer = valid_cer / len(eval_dataloader)
+        eval_loss_list.append(total_cer)
+
+
         # print("Validation CER:", total_cer)
 
-        if total_cer < 0.01:
-            import datetime
-            save_pretrained_dir = f'save/{total_cer}_{epoch}_{datetime.datetime.now(datetime.timezone(datetime.timedelta(hours=9),"JST")).strftime("%Y%m%dT%H%M%S")}'
+        if total_cer < best_loss:
+            best_loss = total_cer
+            save_pretrained_dir = f'save/{fnn}_best'
             model.save_pretrained(save_pretrained_dir)
 
     model.save_pretrained("save/inter")
 
+    import matplotlib.pyplot as plt
+
+    length = train_loss_list
+    plt.plot(range(length), train_loss_list)
+    plt.plot(range(length), eval_loss_list)
+    plt.savefig(f'vis/inter/{fnn}_plot.png')
+
 def test():
     import matplotlib.pyplot as plt
 
-    model2 = VisionEncoderDecoderModel.from_pretrained("save/last")
-    for file_name in test_path:
+    model2 = VisionEncoderDecoderModel.from_pretrained("save/20230324T182131_best")
+    total = 0
+    for file_name in tqdm(test_path):
+        tmp_total = 0
         image = Image.open(file_name).convert("RGB")
+        fn = file_name.split('/')[-1].split('.')[0]
         # display(image)
-        plt.imshow(image)
         
-        
+
         generated_ids = model2.generate(processor(image, return_tensors="pt").pixel_values)
         name = processor.batch_decode(generated_ids, skip_special_tokens=True)[0]
+        
+        plt.imshow(image)
         plt.axis('off')
         plt.title(name)
-        plt.savefig(f'vis/{name}.png')
+
+        for i in range(len(fn)):
+            if i < len(name) and fn[i] == name[i]:
+                tmp_total += 1
+        
+        if tmp_total == len(fn):
+            plt.savefig(f'vis/inter/suc/{fn}.png')
+        else:
+            plt.savefig(f'vis/inter/fai/{fn}.png')
+
+        tmp_total /= len(fn)
+        total += tmp_total
+        
+        
+
+    print('acc:', total / len(test_path))
+
 
 if __name__ == '__main__':
     train()
+    test()
