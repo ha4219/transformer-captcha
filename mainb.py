@@ -45,9 +45,12 @@ p2 = glob.glob(path2)
 p3 = glob.glob(path3)
 min_length = min([len(p1), len(p2), len(p3)])
 all_path = p1[:min_length] + p2[:min_length] + p3[:min_length]
+all_path = p2
 train_path, test_path = train_test_split(all_path, random_state=42)
 
 processor = TrOCRProcessor.from_pretrained("microsoft/trocr-small-printed")
+
+
 train_dataset = IAMDataset(paths=train_path, processor=processor)
 eval_dataset = IAMDataset(paths=test_path, processor=processor)
 
@@ -119,7 +122,7 @@ def train():
     optimizer = AdamW(model.parameters(), lr=5e-5)
     train_loader_length = len(train_dataloader)
     eval_loader_length = len(eval_dataloader)
-    best_loss = 10.0
+    best_loss = 1e9
     train_loss_list, eval_loss_list = [], []
 
     for epoch in range(epochs):  # loop over the dataset multiple times
@@ -171,16 +174,21 @@ def train():
 
     import matplotlib.pyplot as plt
 
-    length = train_loss_list
-    plt.plot(range(length), train_loss_list)
-    plt.plot(range(length), eval_loss_list)
+    length = len(train_loss_list)
+    plt.plot(range(length), train_loss_list, label='train_loss')
+    plt.plot(range(length), eval_loss_list, label='eval_loss')
+    plt.legend()
     plt.savefig(f'vis/inter/{fnn}_plot.png')
 
 def test():
     import matplotlib.pyplot as plt
 
-    model2 = VisionEncoderDecoderModel.from_pretrained("save/20230324T182131_best")
+    pair = []
+
+    model2 = VisionEncoderDecoderModel.from_pretrained("save/20230330T213553_best")
     total = 0
+    ans = 0
+
     for file_name in tqdm(test_path):
         tmp_total = 0
         image = Image.open(file_name).convert("RGB")
@@ -199,6 +207,16 @@ def test():
             if i < len(name) and fn[i] == name[i]:
                 tmp_total += 1
         
+        for i in range(max(len(fn), len(name))):
+            if i<len(fn) and i<len(name):
+                pair.append((fn[i], name[i]))
+            elif i>=len(fn):
+                pair.append((' ', name[i]))
+            else:
+                pair.append((fn[i], ' '))
+        if name == fn:
+            ans += 1
+        
         if tmp_total == len(fn):
             plt.savefig(f'vis/inter/suc/{fn}.png')
         else:
@@ -207,11 +225,14 @@ def test():
         tmp_total /= len(fn)
         total += tmp_total
         
-        
+    import pickle
+    with open("pair.npy", "wb") as f:
+        pickle.dump(pair, f)
 
     print('acc:', total / len(test_path))
+    print('ans:', ans / len(test_path))
 
 
 if __name__ == '__main__':
-    train()
+    # train()
     test()
